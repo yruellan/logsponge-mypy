@@ -1,0 +1,12 @@
+[project]
+name = "logsponge"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = [
+    "logicsponge==0.0.9",
+    "logicsponge-core>=0.0.18",
+    "mypy>=1.19.0",
+    "ruff>=0.14.8",
+]

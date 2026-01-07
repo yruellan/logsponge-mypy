@@ -68,7 +68,8 @@ def make_warning(func):
             return None
     return wrapper
 
-@make_warning
+_METADATA_KEY = "logicsponge_source_term"
+
 def source_term_hook(ctx: ClassDefContext) -> None:
     """
     Infer the output type of a SourceTerm subclass from:
@@ -83,9 +84,18 @@ def source_term_hook(ctx: ClassDefContext) -> None:
     info: TypeInfo = ctx.cls.info
     api = ctx.api
 
+    # ------------------------------------------------------------------
+    # 0. Idempotency guard
+    # ------------------------------------------------------------------
+    meta = info.metadata.setdefault("logicsponge", {})
+    if meta.get(_METADATA_KEY):
+        return
+
+    # ------------------------------------------------------------------
+    # 1. Locate generate()
+    # ------------------------------------------------------------------
     generate_def: Optional[FuncDef] = None
 
-    # 1. Locate generate()
     for stmt in ctx.cls.defs.body:
         if isinstance(stmt, FuncDef) and stmt.name == "generate":
             generate_def = stmt
@@ -99,12 +109,12 @@ def source_term_hook(ctx: ClassDefContext) -> None:
         return
 
     if generate_def.type is None:
-        # This means mypy could not infer the signature
         api.fail(
             "generate() must have an explicit return type",
             generate_def,
         )
         return
+
 
     if not isinstance(generate_def.type, CallableType):
         api.fail(
@@ -112,28 +122,26 @@ def source_term_hook(ctx: ClassDefContext) -> None:
             generate_def,
         )
         return
-
+    
     ret_type: Type = generate_def.type.ret_type
     print(f"LOG1 : {ret_type = }, {type(ret_type) = }")
+    # ret_type = resolve_unbound_type(api, generate_def, ret_type)
+    # print(f"LOG2 : {ret_type = }, {type(ret_type) = }")
 
-    # Resolve UnboundType and its arguments recursively
-    
-    ret_type = resolve_unbound_type(api, generate_def, ret_type)
-    print(f"LOG2 : {ret_type = }, {type(ret_type) = }")
+    # ------------------------------------------------------------------
+    # 2. Defer if unresolved
+    # ------------------------------------------------------------------
+    if isinstance(ret_type, UnboundType):
+        if api.final_iteration:
+            api.fail(
+                "generate() return type could not be resolved; "
+                "expected Iterator[DataItem[T]]",
+                generate_def,
+            )
+            return
 
-    # If we still have unresolved types, defer processing to a later pass
-    # if isinstance(ret_type, UnboundType):
-    #     print(f"LOG-UNBOUND : {ret_type = }, {ret_type.name = } {ret_type.args = }")
-    #     if ctx.api.final_iteration:
-    #         ctx.api.fail(
-    #             "generate() must have a fully-resolved return type "
-    #             "(e.g. Iterator[DataItem[T]])",
-    #             generate_def,
-    #         )
-    #         return
-    #     api.defer()
-    #     return
-    # print(f"LOG3 : {ret_type = }, {type(ret_type) = }")
+        api.defer()
+        return
 
     # 2. Expect Iterator[DataItem[T]]
     if not isinstance(ret_type, Instance):

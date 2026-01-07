@@ -4,10 +4,11 @@ import logicsponge.core as ls
 
 
 class Hello(ls.SourceTerm):
+    # def generate(self) -> Iterator[ls.DataItem]:
     def generate(self) -> Iterator[ls.DataItem]:
         incomplete_message = "Hello"
         out = ls.DataItem({"message": incomplete_message})
-        
+
         yield out
 
 

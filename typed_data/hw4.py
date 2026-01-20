@@ -1,59 +1,98 @@
-from __future__ import annotations
-from typing import TYPE_CHECKING
+from typing import TypedDict, Iterator, Any, TYPE_CHECKING, TypeVar, Generic
+import logicsponge.core as ls
 
-"""
-This file contains minimal expressions/annotations that illustrate which mypy
-plugin hooks would be called, assuming the plugin returns callbacks for the
-fully-qualified names used below.
+# 1. Define the Data Schemas
+AnyX = TypedDict('AnyX', {'x': Any})
+StrX = TypedDict('StrX', {'x': str})
+IntX = TypedDict('IntX', {'x': int})
 
-Notes:
-- We import inside `TYPE_CHECKING` to avoid runtime import requirements.
-- Mypy still analyzes these references and will invoke the corresponding hooks.
-"""
+AnyY = TypedDict('AnyY', {'y': Any})
+StrY = TypedDict('StrY', {'y': str})
+IntY = TypedDict('IntY', {'y': int})
 
-if TYPE_CHECKING:
-	# Hypothetical packages that the plugin targets
-	from lib import Vector  # fullname: "lib.Vector"
-	import mylib            # functions/methods under: "mylib.*"
+T = TypeVar('T')
+
+# class GenX[T](TypedDict):
+#     x: T
+# class GenY[T](TypedDict):
+#     y: T
+class GenX(TypedDict, Generic[T]):
+    x: T
+class GenY(TypedDict, Generic[T]):
+    y: T
+
+# 2. Annotate the Classes
+class CreateStrX(ls.SourceTerm):
+    Output = StrX
+
+    def generate(self) -> Iterator[ls.DataItem]:
+        yield ls.DataItem({"x": "Hello"})
+class CreateIntX(ls.SourceTerm):
+    Output = IntX
+
+    def generate(self) -> Iterator[ls.DataItem]:
+        yield ls.DataItem({"x": 42})
+
+class XtoY_Str(ls.FunctionTerm):
+    Input = StrX
+    Output = StrY
+    def f(self, di: ls.DataItem) -> ls.DataItem:
+        return ls.DataItem({"y": di["x"] + " World!"})
+class XtoY_Int(ls.FunctionTerm):
+    Input = IntX
+    Output = IntY
+    def f(self, di: ls.DataItem) -> ls.DataItem:
+        return ls.DataItem({"y": di["x"] + 1})
+class XtoY_Any(ls.FunctionTerm):
+    Input = AnyX
+    Output = AnyY
+    def f(self, di: ls.DataItem) -> ls.DataItem:
+        return ls.DataItem({"y": di["x"]})
+
+class XtoY_Gen[T](ls.FunctionTerm):
+    # Input = GenX[T]
+    # Output = GenY[T]
+    @property
+    def Input(self) -> type[GenX[T]]:
+        return GenX[T]
+    @property
+    def Output(self) -> type[GenY[T]]:
+        return GenY[T]
+
+    def f(self, di: ls.DataItem) -> ls.DataItem:
+        return ls.DataItem({"y": di["x"]})
+    
+class PrintIntY(ls.FunctionTerm):
+    Input = IntY
+    def f(self, di: ls.DataItem) -> ls.DataItem:
+        print(f"PrintIntY: {di['y']}")
+        return di
 
 
-# --- get_type_analyze_hook("lib.Vector") ------------------------------------
-# When mypy analyzes these annotations, it will call
-#   get_type_analyze_hook("lib.Vector")
-# and then your returned AnalyzeTypeContext callback.
-if TYPE_CHECKING:
-    a: "Vector[int, int]"
-    b: "Vector[int, int, int]"
+# 3. Define the Main Function
+def main() -> None:
 
+    s = [
+        # CreateStrX() * XtoY_Str() * ls.Print() * ls.Stop(),
+        # CreateIntX() * XtoY_Int() * ls.Print() * ls.Stop(),
+        # CreateStrX() * XtoY_Gen() * ls.Print() * ls.Stop(),
+        # CreateIntX() * XtoY_Gen() * ls.Print() * ls.Stop(),
+        CreateIntX() * XtoY_Gen() * PrintIntY() * ls.Stop(),  # Should be type error
+        CreateIntX() * XtoY_Gen[int]() * PrintIntY() * ls.Stop(),  # Should be type error
+    ]
+    
+    # sponge = (
+    #     Hello()                 # message : str
+    #     # * World1()              # message : str           
+    #     * ls.Print()            # identity
+    #     * Analyse()             # message : str
+    #     * ls.Stop()             # None
+    # )
 
-# --- get_function_hook("mylib.make_pair") -----------------------------------
-# On analyzing this call expression, mypy will call
-#   get_function_hook("mylib.make_pair")
-# and then your FunctionContext callback.
-if TYPE_CHECKING:
-	pair_result = mylib.make_pair(1, "x")
+    if not TYPE_CHECKING:
+        print(GenX)
+        for sp in s:
+            sp.start()
 
-
-# --- get_function_signature_hook("mylib.varargs_to_fixed") ------------------
-# Before type-checking the call, mypy will ask the plugin for a signature hook
-# via get_function_signature_hook("mylib.varargs_to_fixed"). If provided, the
-# returned FunctionSigContext callback can reshape the callable's signature.
-if TYPE_CHECKING:
-	sig_fixed = mylib.varargs_to_fixed(1, 2, 3)
-
-
-# --- get_method_hook("mylib.SomeClass.compute") -----------------------------
-# For method calls, mypy uses get_method_hook with the method's fullname.
-# Here it would invoke get_method_hook("mylib.SomeClass.compute").
-if TYPE_CHECKING:
-	sc = mylib.SomeClass()
-	computed = sc.compute(42)
-
-
-# --- get_method_signature_hook("mylib.SomeClass.__add__") -------------------
-# Special methods (except __init__ and __new__) can have their signatures
-# adjusted via get_method_signature_hook. An expression like sc + 10 resolves
-# to __add__, so mypy will look up
-#   get_method_signature_hook("mylib.SomeClass.__add__").
-if TYPE_CHECKING:
-	plus_result = sc + 42 # triggers __add__ on SomeClass
+if __name__ == "__main__":
+    main()

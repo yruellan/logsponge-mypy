@@ -1,12 +1,13 @@
-from typing import TypedDict, Iterator, Any
+from typing import TypedDict, Iterator, Any, TYPE_CHECKING
 import logicsponge.core as ls
 
 # 1. Define the Data Schemas
 class HelloMsg(TypedDict):
     message: str
-
 class HelloMsg2(TypedDict):
     message: str
+
+HelloMsg3 = TypedDict('HelloMsg3', {'message': str})
 
 class WorldMsg(TypedDict):
     message: str
@@ -36,6 +37,10 @@ class World2(ls.FunctionTerm):
     Output = WorldMsg
     f = global_f
 class World3(ls.FunctionTerm):
+    Input = HelloMsg3
+    Output = WorldMsg
+    f = global_f
+class World4(ls.FunctionTerm):
     Input = TypedDict('Input', {'message': str})
     Output = VoidMsg
     f = global_f
@@ -47,7 +52,13 @@ class Analyse(ls.FunctionTerm):
     def f(self, di: ls.DataItem) -> ls.DataItem:
         print(f"Analyse: {list(di.items())}")
         return ls.DataItem({})
-    
+
+class SinkTerm(ls.FunctionTerm):
+    Input = Any
+    Output = VoidMsg
+
+    def f(self, di: ls.DataItem) -> ls.DataItem:
+        return ls.DataItem({})
 
 # 3. Define the Main Function
 def main() -> None:
@@ -55,19 +66,23 @@ def main() -> None:
     s = [
         Hello() * World1(),
         Hello() * World2(),
-        Hello() * World3()
+        Hello() * World3(),
+        Hello() * World4(),
+        Hello() * SinkTerm(),
+        Hello() * ls.Stop(),
     ]
-    print(len(s))
+    
+    # sponge = (
+    #     Hello()                 # message : str
+    #     # * World1()              # message : str           
+    #     * ls.Print()            # identity
+    #     * Analyse()             # message : str
+    #     * ls.Stop()             # None
+    # )
 
-    # The plugin will validate this chain
-    sponge = (
-        Hello()                 # message : str
-        * World1()              # message : str           
-        * ls.Print()            # identity
-        * Analyse()             # message : str
-        * ls.Stop()             # None
-    )
-    sponge.start()
+    if not TYPE_CHECKING:
+        print(len(s))
+        # sponge.start()
 
 if __name__ == "__main__":
     main()

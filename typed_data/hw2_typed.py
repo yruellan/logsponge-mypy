@@ -11,6 +11,7 @@ class Type3[T](TypedDict):
     msg: T
 
 class Source(ls.SourceTerm):
+    Input = TypedDict('Input', {})
     def generate(self) -> Iterator[ls.DataItem]:
         val: int = 42
         out = ls.DataItem({"msg": val})

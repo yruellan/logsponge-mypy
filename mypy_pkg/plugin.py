@@ -17,22 +17,14 @@ from mypy.expandtype import expand_type
 
 class StreamPlugin(Plugin):
     def get_method_hook(self, fullname: str) -> Optional[Callable[[MethodContext], MypyType]]:
-        """
-        Trigger this hook whenever `__mul__` is called on a SourceTerm or FunctionTerm.
-        """
-        # Adjust these class names to match the actual fully qualified names in logicsponge
-        # target_classes = {
-        #     "logicsponge.core.SourceTerm", 
-        #     "logicsponge.core.FunctionTerm",
-        #     # Add your specific subclasses if they don't inherit __mul__ directly
-        # }
-        
-        if "." in fullname and fullname.endswith("__mul__"):
-            # Simple check: assuming if it ends in __mul__, we check it.
-            # You might want to verify the class matches target_classes strictly.
+        # Only run this plugin for the logic sponge library
+        if not fullname.startswith("logicsponge."):
+            return None
+            
+        if fullname.endswith(".__mul__"):
             return self.check_stream_compatibility
         return None
-
+    
     def check_stream_compatibility(self, ctx: MethodContext) -> MypyType:
         """
         Logic to check if LHS output matches RHS input.
@@ -101,61 +93,67 @@ class StreamPlugin(Plugin):
     def _check_stream_compatibility(self, ctx: MethodContext, rhs_type: Instance, lhs_output: TypeInfo, rhs_input: TypeInfo) -> MypyType:
         """
         Logic to check if LHS output matches RHS input using structural subtyping.
+        Corrected to verify that LHS satisfies all requirements of RHS.
         """
-        # TODO: Change return type to bool ?
-
-        ctx.api.note("Running _check_stream_compatibility", ctx.context)
-
+        
+        # 1. Exact Name Match (Optimization)
         if lhs_output.fullname == rhs_input.fullname:
-            print(f"\tStream types match: {lhs_output.name} (identical names)")
             return rhs_type
 
+        # 2. Handle 'Any'
         if rhs_input.fullname == 'typing.Any':
-            print("\tStream types match: rhs_input is Any")
             return rhs_type
 
+        # 3. Nominal Subtype Check (Inheritance)
+        # Useful if not using TypedDicts, or if one inherits from the other
         lhs_out_inst = Instance(lhs_output, [])
         rhs_in_inst = Instance(rhs_input, [])
         if is_subtype(lhs_out_inst, rhs_in_inst):
-            print(f"\tStream types match: {lhs_output.name} is subtype of {rhs_input.name}")
-
             return rhs_type
 
-        # Compare the TypedDict structures
+        # 4. TypedDict Structural Check
         if lhs_output.typeddict_type is None or rhs_input.typeddict_type is None:
-            print(f"\tOne of the types is not a TypedDict: {lhs_output.name}, {rhs_input.name}")
-            print(f"\tleft:{lhs_output}")
-            print(f"\tright:{rhs_input}")
+            # If we are here, nominal check failed and one isn't a TypedDict.
+            # We fail because we cannot perform structural comparison on non-TypedDicts.
             ctx.api.fail(
-                "Stream mismatch: Cannot compare non-TypedDict types.",
+                f"Stream mismatch: Cannot compose '{lhs_output.name}' into '{rhs_input.name}' "
+                "(types match neither by inheritance nor TypedDict structure).",
                 ctx.context
             )
             return ctx.default_return_type
         
+        # Prepare generic mappings for the RHS (Input)
         rhs_map = dict(zip(rhs_type.type.type_vars, rhs_type.args))
-        print(f"\tExpanding lhs_output and rhs_input with rhs_type args: {rhs_map}")
-        print(f"\t-> {rhs_type.type.type_vars} mapped to {rhs_type.args}")
         
-        for k, type_l in lhs_output.typeddict_type.items.items():
-            type_r = rhs_input.typeddict_type.items.get(k)
-            if type_r == type_l:
-                continue
-            expected_type = expand_type(type_r, rhs_map)
-            if is_subtype(type_l, expected_type):
-                print("\tStream types match")
-                continue
-            print(f"\tStream types mismatch : {type_r} ({type(type_r)})")
-            ctx.api.fail(
-                f"Stream mismatch: expected key '{k}' of type '{type_l}' "+
-                f"but got type '{type_r}' from "+
-                f"'{rhs_type.type.name}'",
-                ctx.context
-            )
-                
-            return AnyType(TypeOfAny.from_error)
+        # KEY FIX: Iterate over RHS (Requirements), not LHS (Available)
+        # We need to ensure every key required by RHS exists in LHS.
+        required_inputs = rhs_input.typeddict_type.items
+        available_outputs = lhs_output.typeddict_type.items
         
-        print(f"\tStream types match: {lhs_output.name} (identical TypedDict structure)")
+        for key, type_r in required_inputs.items():
+            
+            # Check A: Does the Output have the required key?
+            type_l = available_outputs.get(key)
+            if type_l is None:
+                ctx.api.fail(
+                    f"Stream mismatch: Input expects key '{key}', but Output does not provide it.",
+                    ctx.context
+                )
+                return AnyType(TypeOfAny.from_error)
 
+            # Check B: Are the types compatible?
+            expected_type = expand_type(type_r, rhs_map)
+            
+            if not is_subtype(type_l, expected_type):
+                ctx.api.fail(
+                    f"Stream mismatch: Key '{key}' type mismatch.\n"
+                    f"  Expected: {expected_type}\n"
+                    f"  Got:      {type_l}",
+                    ctx.context
+                )
+                return AnyType(TypeOfAny.from_error)
+        
+        # If we survive the loop, the types are compatible.
         return rhs_type
         
     def _get_type_attribute(self, type_info: TypeInfo, attr_name: str) -> Optional[TypeInfo]:

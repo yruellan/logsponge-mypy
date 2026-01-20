@@ -8,5 +8,11 @@ dependencies = [
     "logicsponge==0.0.9",
     "logicsponge-core>=0.0.18",
     "mypy>=1.19.0",
+    "pytest>=9.0.2",
     "ruff>=0.14.8",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
 ]

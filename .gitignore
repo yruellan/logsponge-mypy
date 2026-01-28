@@ -2,3 +2,11 @@
 .DS_Store
 __pycache__/
 .vscode/
+
+reports/*.aux
+reports/*.fdb_latexmk
+reports/*.fls
+reports/*.log
+reports/*.out
+reports/*.pdf
+reports/*.synctex.gz

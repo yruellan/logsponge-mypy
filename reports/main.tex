@@ -1,0 +1,67 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\geometry{a4paper, margin=1in}
+
+\title{Analysis of the logsponge-mypy Project}
+\author{Scientific Report}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report analyses \texttt{logsponge-mypy}, a static analysis plugin developed for the LogicSponge framework. The plugin extends the \texttt{mypy} type checker to validate the composition of data processing streams. By implementing structural subtyping logic, it detects compatibility issues between stream components that are connected via the multiplication operator, ensuring data integrity across dynamic pipelines.
+\end{abstract}
+
+\section{Introduction}
+The \texttt{logsponge-mypy} project addresses specific challenges in the LogicSponge framework, where data pipelines are constructed by composing ``Terms'' (Sources, Functions, Sinks) using Python's multiplication operator (\texttt{\_\_mul\_\_}).
+
+Standard Python type hints often fail to capture the complex, structural dependencies between these dynamic components. This limitation can lead to invisible incompatibilities where a producer (Left-Hand Side, LHS) fails to emit the data structure required by a consumer (Right-Hand Side, RHS). The \texttt{logsponge-mypy} plugin aims to mitigate these runtime errors by enforcing static compatibility checks.
+
+\section{Methodology}
+The core methodology of the project relies on \textbf{structural subtyping} rather than nominal inheritance to verify component compatibility.
+
+\subsection{Data Contracts}
+Components within the framework define their data requirements using \texttt{TypedDict} structures. These schemas are assigned to class attributes specifically named \texttt{Input} and \texttt{Output}.
+
+\subsection{Validation Logic}
+When two components are composed (e.g., \texttt{Stream A * Stream B}), the plugin performs a two-step validation:
+\begin{enumerate}
+    \item \textbf{Key Existence:} It verifies that the \texttt{Output} schema of the LHS contains all keys required by the \texttt{Input} schema of the RHS.
+    \item \textbf{Type Compatibility:} It checks that the types of the values for these keys in the LHS are subtypes of the expected types in the RHS.
+\end{enumerate}
+
+\section{Technical Implementation}
+The tool is implemented as a class named \texttt{StreamPlugin}, which inherits from \texttt{mypy.plugin.Plugin}.
+
+\subsection{Plugin Architecture}
+The plugin registers a specific \textbf{method hook} for the \texttt{\_\_mul\_\_} method. This allows it to intercept and analyze stream composition operations specifically.
+
+\subsection{Component Behavior Classification}
+To enforce logical validity, the plugin categorizes components into three behaviors:
+\begin{itemize}
+    \item \textbf{Source:} Generators of data which cannot be placed on the Right-Hand Side (RHS) of a composition.
+    \item \textbf{Identity:} Components like \texttt{Print} or \texttt{JsonParser} that pass the input type through to the output unmodified.
+    \item \textbf{Sink:} Terminal components (e.g., \texttt{Stop}) that accept any input and end the stream.
+\end{itemize}
+
+\subsection{AST Traversal}
+The implementation involves manual inspection of the Abstract Syntax Tree (AST). The plugin attempts to resolve \texttt{Input} and \texttt{Output} attributes by traversing the Method Resolution Order (MRO), handling various definitions including variable assignments, type aliases, and decorators.
+
+\section{Testing and Validation}
+The project employs an integration testing strategy using \texttt{pytest}. The tests execute \texttt{mypy} as a subprocess against specific test files (e.g., \texttt{hw4.py}). This setup validates that the plugin correctly identifies type errors in invalid streams while allowing valid streams to pass.
+
+\section{Discussion and Limitations}
+While effective, the current implementation has identifiable limitations:
+\begin{itemize}
+    \item \textbf{Generics Support:} There are indications of ongoing work to support generic types (e.g., \texttt{XtoY\_Gen[T]}), but the functionality appears to be primarily used for detecting mismatches in the current test suite.
+    \item \textbf{Attribute Resolution Complexity:} The static resolution of Python attributes is complex, requiring the plugin to explicitly handle multiple edge cases such as inherited attributes and decorated classes.
+\end{itemize}
+
+\end{document}

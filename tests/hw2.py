@@ -1,73 +1,98 @@
 from typing import TypedDict, Iterator
-
 import logicsponge.core as ls
 
-class Type1(TypedDict):
+# 1. Define the Types
+class IntMsg(TypedDict):
     msg: int
-class Type2(TypedDict):
+
+class StrMsg(TypedDict):
     msg: str
-    x: float
-class Type3[T](TypedDict):
-    msg: T
 
+# 2. Annotate the Classes
 class Source(ls.SourceTerm):
-    Input = TypedDict('Input', {})
-    def generate(self) -> Iterator[ls.DataItem]:
-        val: int = 42
-        out = ls.DataItem({"msg": val})
-        yield out
-
-
-class F(ls.FunctionTerm):
-    def f(self, di: ls.DataItem) -> ls.DataItem:
-        new_value: int = di["msg"] + 1
-        return ls.DataItem({"msg": new_value})
+    # Source produces IntMsg
+    Output = IntMsg
     
-class G(ls.FunctionTerm):
+    def generate(self) -> Iterator[ls.DataItem]:
+        yield ls.DataItem({"msg": 42})
+
+class IntFun(ls.FunctionTerm):
+    # Expects Int, Returns Int (Increment)
+    Input = IntMsg
+    Output = IntMsg
+
     def f(self, di: ls.DataItem) -> ls.DataItem:
-        new_value: str = f"{di["msg"]}{di["msg"]}"
-        return ls.DataItem({"msg": new_value})
+        return ls.DataItem({"msg": di["msg"] + 1})
+    
+class StrFun(ls.FunctionTerm):
+    # Expects Str, Returns Str (Duplication)
+    Input = StrMsg
+    Output = StrMsg
+
+    def f(self, di: ls.DataItem) -> ls.DataItem:
+        new_val = f"{di['msg']}{di['msg']}"
+        return ls.DataItem({"msg": new_val})
     
 class To_str(ls.FunctionTerm):
+    # Converts Int -> Str
+    Input = IntMsg
+    Output = StrMsg
+
     def f(self, di: ls.DataItem) -> ls.DataItem:
-        new_value: str = str(di["msg"])
-        return ls.DataItem({"msg": new_value})
+        return ls.DataItem({"msg": str(di["msg"])})
     
 class To_int(ls.FunctionTerm):
+    # Converts Str -> Int
+    Input = StrMsg
+    Output = IntMsg
+
     def f(self, di: ls.DataItem) -> ls.DataItem:
-        new_value: int = int(di["msg"])
-        return ls.DataItem({"msg": new_value})
+        return ls.DataItem({"msg": int(di["msg"])})
+    
+class RequireExtra(ls.FunctionTerm):
+    Input = TypedDict('Input', {'msg': int, 'extra': bool})
+    Output = IntMsg
+    def f(self, di: ls.DataItem) -> ls.DataItem: return di
 
-# Source : None -> int
-# F      : int  -> int
-# G      : str  -> str
-# To_str : int  -> str
-# To_int : str  -> int
-# Print  : 'a  -> 'a
-# Stop   : 'a  -> None
 
+
+# 3. Main with Test Cases
 def main() -> None:
-    """Run a simple Hello World circuit."""
 
-    # Simple int pipeline
-    s1 = Source() * F() * ls.Print() * ls.Stop()
+    # --- Valid Pipelines (Should Pass) ---
+    s1 = Source() * IntFun() * ls.Print() * ls.Stop()
+    s2 = Source() * To_str() * StrFun() * To_int() * ls.Print() * ls.Stop()
 
-    # More complex int pipeline
-    s2 = Source() * F() * F() * F() * ls.Print() * ls.Stop()
+    # --- Invalid Pipelines (Should Fail) ---
+    
+    # CASE 1: Mismatch immediately after Source
+    # Source outputs IntMsg (msg: int), but StrFun expects StrMsg (msg: str)
+    # E: Stream mismatch
+    fail1 = Source() * StrFun() * ls.Stop()
 
-    # Mixed type pipeline
-    s3 = Source() * To_str() * G() * To_int() * ls.Print() * ls.Stop()
+    # CASE 2: Mismatch in the middle of a chain
+    # To_str outputs StrMsg, but IntFun expects IntMsg
+    # E: Stream mismatch
+    fail2 = Source() * To_str() * IntFun() * ls.Stop()
 
-    # More complex pipeline
-    s4 = Source() * F() * To_str() * G() * To_int() * F() * ls.Print() * ls.Stop()
+    # CASE 3: Wrong converter order
+    # Source outputs Int, To_int expects Str
+    # E: Stream mismatch
+    fail3 = Source() * To_int() * ls.Stop()
+    
+    # CASE 4: Missing keys (Structural mismatch)
+    # If we tried to pipe into a component requiring extra keys
+    # Source provides {'msg': int}, but RequireExtra needs {'msg': int, 'extra': bool}
+    # E: Stream mismatch
+    fail4 = Source() * RequireExtra() * ls.Stop()
 
-    s1.start() # = 43
-    s2.start() # = 45
-    s3.start() # = 4242
-    s4.start() # = 4344
 
-    # a: str = 1.0 + 2
-    # print(f"{a = }")
+    s1.start()
+    s2.start()
+    fail1.start()
+    fail2.start()
+    fail3.start()
+    fail4.start()
 
 if __name__ == "__main__":
     main()

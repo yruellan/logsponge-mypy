@@ -5,6 +5,35 @@
 \usepackage{listings}
 \usepackage{xcolor}
 
+% Define custom colors
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+\definecolor{codeblue}{rgb}{0,0,0.8}
+
+% Configure listings style
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{codeblue}\bfseries,
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=4
+}
+
+\lstset{style=mystyle}
+
 \geometry{a4paper, margin=1in}
 
 \title{Analysis of the logsponge-mypy Project}
@@ -56,6 +85,73 @@ The implementation involves manual inspection of the Abstract Syntax Tree (AST).
 
 \section{Testing and Validation}
 The project employs an integration testing strategy using \texttt{pytest}. The tests execute \texttt{mypy} as a subprocess against specific test files (e.g., \texttt{hw4.py}). This setup validates that the plugin correctly identifies type errors in invalid streams while allowing valid streams to pass.
+
+\section{Syntax and Usage Examples}
+To illustrate the practical application of the \texttt{LogicSponge} framework and its integration with the \texttt{mypy} plugin, we present examples derived from the project's test suite (\texttt{tests/hw1.py}).
+
+\subsection{Defining Data Contracts}
+Components in the framework communicate via dictionary-like payloads. To enable static analysis, the structure of these payloads is strictly defined using Python's \texttt{TypedDict}. This creates a formal contract for the data flowing through the stream.
+
+\begin{lstlisting}[language=Python, caption=Defining Data Schemas using TypedDict, frame=single]
+from typing import TypedDict
+
+# Define the structure of the message emitted by the source
+class HelloMsg(TypedDict):
+    message: str
+
+# Define the structure of the message expected by the next component
+class WorldMsg(TypedDict):
+    message: str
+
+# You can also use inline TypedDict definitions
+AnotherMsg = TypedDict('AnotherMsg', {'message': str})
+\end{lstlisting}
+
+\subsection{Annotating Components}
+Components are implemented as classes inheriting from \texttt{SourceTerm} (for producers) or \texttt{FunctionTerm} (for processors). The critical requirement for the \texttt{logsponge-mypy} plugin is the declaration of \texttt{Input} and \texttt{Output} class attributes. These attributes link the runtime logic to the static \texttt{TypedDict} definitions.
+
+\begin{lstlisting}[language=Python, caption=Component Definition with Type Annotations, frame=single]
+import logicsponge.core as ls
+
+class Hello(ls.SourceTerm):
+    """
+    A Source component that generates data.
+    It declares 'Output' so the plugin knows what it produces.
+    """
+    Output = HelloMsg
+
+    def generate(self):
+        yield ls.DataItem({"message": "Hello"})
+
+class World(ls.FunctionTerm):
+    """
+    A Function component that processes data.
+    It declares both 'Input' requirements and 'Output' guarantees.
+    """
+    Input = HelloMsg
+    Output = WorldMsg
+
+    def f(self, di: ls.DataItem) -> ls.DataItem:
+        # Business logic transforming the data
+        return ls.DataItem({"message": di["message"] + " World!"})
+\end{lstlisting}
+
+\subsection{Stream Composition}
+The framework uses the multiplication operator (\texttt{*}) to compose terms into a pipeline. The \texttt{logsponge-mypy} plugin intercepts this operator to verify that the \texttt{Output} of the left-hand term satisfies the \texttt{Input} of the right-hand term.
+
+Formally, the plugin use the following rule of typing:
+$${\frac {\Gamma \vdash f: \alpha \to \beta \qquad \Gamma \vdash g: \beta \to \gamma }{\Gamma \vdash (f * g): \alpha \to \gamma }}$$
+
+\begin{lstlisting}[language=Python, caption=Safe Stream Composition, frame=single]
+def main() -> None:
+    # The plugin validates this chain at type-checking time:
+    # Hello (outputs HelloMsg) -> World (requires HelloMsg)
+    
+    stream = Hello() * World()
+    
+    # If the types were incompatible (e.g., missing keys), 
+    # mypy would raise a "Stream mismatch" error here.
+\end{lstlisting}
 
 \section{Discussion and Limitations}
 While effective, the current implementation has identifiable limitations:

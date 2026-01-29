@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Optional, Callable
 from enum import Enum, auto
 import sys
+import tomllib
 
 from mypy.plugin import Plugin, MethodContext
 from mypy.types import (
@@ -12,10 +13,41 @@ from mypy.types import (
 from mypy.nodes import TypeInfo, Var, TypeAlias, Decorator
 from mypy.subtypes import is_subtype
 from mypy.expandtype import expand_type
+from mypy.options import Options
 
 # https://mypy.readthedocs.io/en/stable/extending_mypy.html
 
 class StreamPlugin(Plugin):
+
+    def __init__(self, options: Options) -> None:
+        super().__init__(options)
+        
+        # Default value
+        self.allow_untyped_streams: bool = False
+        
+        # Try to read from pyproject.toml
+        # Note: options.config_file might be 'mypy.ini', 'pyproject.toml', or None
+        config_path = "pyproject.toml" 
+        
+        # If the user explicitly passed a config file to mypy, checks if it is useful
+        if options.config_file and options.config_file.endswith(".toml"):
+            config_path = options.config_file
+
+        try:
+            with open(config_path, "rb") as f:
+                data = tomllib.load(f)
+                # Navigate to [tool.logicsponge]
+                settings = data.get("tool", {}).get("logicsponge", {})
+                self.allow_untyped_streams = settings.get("allow_untyped_streams", False)
+                
+                print(f"Logicsponge Plugin: allow_untyped_streams = {self.allow_untyped_streams}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            # Be careful not to crash Mypy if config parsing fails
+            print(f"Warning: Could not parse configuration: {e}")
+
+
     def get_method_hook(self, fullname: str) -> Optional[Callable[[MethodContext], MypyType]]:
         # Only run this plugin for the logic sponge library
         if not fullname.startswith("logicsponge."):
@@ -52,7 +84,7 @@ class StreamPlugin(Plugin):
         }
 
         rhs_fullname = rhs_type.type.fullname
-        rhs_behavior = LIBRARY_BEHAVIORS.get(rhs_fullname)
+        rhs_behavior: Behavior | None = LIBRARY_BEHAVIORS.get(rhs_fullname)
         # lhs_fullname = lhs_type.type.fullname
         # lhs_behavior = LIBRARY_BEHAVIORS.get(lhs_fullname)
 
@@ -75,16 +107,20 @@ class StreamPlugin(Plugin):
         # 1. Extract Output type from Left Hand Side (LHS)
         lhs_output = self._get_type_attribute(lhs_type.type, "Output")
         if lhs_output is None:
-            print(f"\tNo Output type found for lhs: {lhs_type.type.name}")
-            ctx.api.note("No Output type found on LHS of stream composition.", ctx.context)
-            return rhs_type
+            if self.allow_untyped_streams:
+                print("\tAllowing untyped stream due to configuration.")
+                return rhs_type
+            ctx.api.fail("No Output type found on LHS of stream composition.", ctx.context)
+            return AnyType(TypeOfAny.from_error)
         
         # 2. Extract Input type from Right Hand Side (RHS)
         rhs_input = self._get_type_attribute(rhs_type.type, "Input")
         if rhs_input is None:
-            print(f"\tNo Input type found for rhs: {rhs_type.type.name}")
-            ctx.api.note("No Input type found on RHS of stream composition.", ctx.context)
-            return rhs_type
+            if self.allow_untyped_streams:
+                print("\tAllowing untyped stream due to configuration.")
+                return rhs_type
+            ctx.api.fail("No Input type found on RHS of stream composition.", ctx.context)
+            return AnyType(TypeOfAny.from_error)
         
         # 3. Check Compatibility
         return self._check_stream_compatibility(ctx, rhs_type, lhs_output, rhs_input)
